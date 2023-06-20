@@ -1,0 +1,124 @@
+\documentclass[10pt,a4paper]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[portuguese]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{graphicx}
+\usepackage{lmodern}
+\usepackage{amssymb}
+\usepackage{verbatim}
+\usepackage{float}
+\usepackage{minitoc}
+\usepackage{hyperref}
+\usepackage{listings}
+\title{\LARGE{Iptables}}
+\date{}
+\renewcommand{\mtctitle}{Conteúdos}
+
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\bfseries}{}{0pt}{\Huge}
+
+\begin{document}
+\chapter{Iptables}
+\section*{Introdução}
+Começamos por limpar todas as regras anteriores e configurar política padrão:
+\begin{lstlisting}[language=Python]
+sudo iptables -F
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT ACCEPT
+\end{lstlisting}
+Na política padrão partimos do principio que todo o tráfego de entrada deve ser descartado e o de saída deve ser aceite.
+
+\section*{Regras para restrições}
+Definimos as seguintes regras de forma a permitir $ping$ apenas da máquina $gcc$ (10.101.151.5) e sub-rede 10.101.85.0/24:
+\begin{lstlisting}[language=Java]
+sudo iptables -A INPUT -p icmp --icmp-type echo-request -s 10.101.151.5 -j ACCEPT
+sudo iptables -A INPUT -p icmp --icmp-type echo-request -s 10.101.85.0/24 -j ACCEPT
+\end{lstlisting}
+Estas regras consistem em adicionar exceções á política de entrada para pacotes $icmp$ dirigidos aos $IP$ relevantes. Para testar o seu funcionamento testamos a utilização do comando $ping$ em várias máquinas, permitidas e não permitidas, e verificamos que apenas a máquina $gcc$ e as máquinas na sub-rede 10.101.85.0/24 conseguiram efetuar o $ping$ com sucesso.\\
+\\
+Permitir conexões do cliente $Tintolmarket$ de qualquer origem para o servidor $TintolmarketServer$ no porto default (12345):
+\begin{lstlisting}[language=Java]
+sudo iptables -A INPUT -p tcp --dport 12345 -j ACCEPT
+\end{lstlisting}
+Tal como nas regras anteriores adicionamos uma exceção á regra de entrada, desta vez aceitando pacotes $tcp$ que tenham como destino o porto 12345. Como teste, verificamos todas as máquinas na rede e concluímos que conseguiam ligar-se ao servidor através do cliente $Tintolmarket$.\\
+\\
+Permitir ligações $ssh$ apenas da máquina $gcc$ e sub-rede $DC1$, $DC2$ e $DC3$ (máscara 255.255.255.224):
+\begin{lstlisting}[language=Java]
+sudo iptables -A INPUT -p tcp --dport 22 -s 10.101.151.5 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 22 -s 10.121.52.0/27 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 22 -s 10.101.52.0/27 -j ACCEPT
+\end{lstlisting}
+Adicionamos mais duas exceções na política de entrada, desta vez para ligações no porto 22 (porto default $ssh$). Para testar o seu funcionamento iniciamos o servidor $ssh$ na máquina de teste, com o comando:
+\begin{lstlisting}[language=Java]
+sudo /usr/sbin/sshd -D
+\end{lstlisting}
+E utilizamos o em várias máquinas:
+\begin{lstlisting}[language=Java]
+ssh -X ip-destino
+\end{lstlisting} 
+Garantindo que apenas as máquinas permitidas conseguiram efetuar a ligação com sucesso.
+
+\section*{Regras para serviços utilizados}
+Limitar $ping$ à frequência máxima de 3 $pings$ por segundo:
+\begin{lstlisting}[language=Java]
+sudo iptables -A OUTPUT -p icmp --icmp-type echo-request -m limit --limit 3/second --limit-burst 3 -d 10.0.0.0/8 -j ACCEPT
+sudo iptables -A OUTPUT -p icmp --icmp-type echo-request -j DROP
+sudo iptables -A INPUT -p icmp --icmp-type echo-reply -s 10.0.0.0/8 -j ACCEPT
+\end{lstlisting}
+O conceito destas regras consiste em aceitar tráfego $icmp$ a um limite máximo de 3 pacotes por segundo para endereços na mesma sub-rede local (10.0.0.0/8) e de seguida fazer $drop$ de todos os pacotes $icmp$ que não se enquadrem nesta regra. É também necessário aceitar as respostas, pelo que se deve adicionar também uma nova regra de $input$. O teste consistiu em fazer $ping$ a outras máquinas e, através da $flag$ $-i$ variar o intervalo entre $pings$. Verificamos que para intervalos inferiores a 0.33 segundos o envio de alguns pacotes era negado.\\
+\\
+Permitir $ssh$ apenas para a máquina $gcc$:
+\begin{lstlisting}[language=Java]
+sudo iptables -A OUTPUT -p tcp --dport 22 -d 10.101.151.5 -j ACCEPT
+sudo iptables -A OUTPUT -p tcp --dport 22 -j DROP
+\end{lstlisting}
+Novamente, adicionamos uma regra que permite aceitar ligações no porto 22 do endereço da máquina $gcc$ e outra para descartar ligações $ssh$ em qualquer outro endereço. Para testar utilizamos novamente o servidor $ssh$ em várias máquinas, incluindo $gcc$, e cliente na máquina de teste ,variando o campo $ip-destino$, verificamos que apenas era possível efetuar ligação com a máquina $gcc$.
+
+\section*{Regras default}
+
+Por fim, executamos as regras mencionadas no enunciado, começando por permitir tráfego $loopback$:
+\begin{lstlisting}[language=Java]
+sudo iptables -A INPUT -i lo -j ACCEPT
+sudo iptables -A OUTPUT -o lo -j ACCEPT
+\end{lstlisting}
+
+E permitir tráfego relacionado com uma ligação já estabelecida:
+\begin{lstlisting}[language=Java]
+sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j
+ACCEPT
+sudo iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j
+ACCEPT
+\end{lstlisting}
+\end{document}
